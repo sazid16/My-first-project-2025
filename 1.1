@@ -1,0 +1,1028 @@
+com.example.expensetrackerchatbot
+│
+├── ui/
+│   ├── ChatScreen.kt
+│   ├── ChatBotMessage.kt
+│
+├── data/
+│   ├── database/
+│   │   ├── Expense.kt
+│   │   ├── ExpenseDao.kt
+│   │   └── ExpenseDatabase.kt
+│   └── model/
+│       └── ChatMessage.kt
+│
+├── ml/
+│   └── Categorizer.kt (light ML logic)
+│
+├── ocr/
+│   └── OCRProcessor.kt (Tesseract handling)
+│
+├── voice/
+│   └── VoiceProcessor.kt (speech-to-text)
+│
+├── repository/
+│   └── ExpenseRepository.kt
+│
+├── viewmodel/
+│   └── ChatViewModel.kt
+│
+└── MainActivity.kt
+package com.example.expensetrackerchatbot
+
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.unit.dp
+import com.example.expensetrackerchatbot.ui.theme.ExpenseTrackerChatbotTheme
+import com.example.expensetrackerchatbot.viewmodel.ChatViewModel
+import androidx.lifecycle.viewmodel.compose.viewModel
+
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContent {
+            ExpenseTrackerChatbotTheme {
+                Surface(color = MaterialTheme.colors.background) {
+                    ChatScreen()
+                }
+            }
+        }
+    }
+}
+package com.example.expensetrackerchatbot.ui
+
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import com.example.expensetrackerchatbot.viewmodel.ChatViewModel
+import androidx.lifecycle.viewmodel.compose.viewModel
+
+@Composable
+fun ChatScreen(chatViewModel: ChatViewModel = viewModel()) {
+    val chatMessages by chatViewModel.chatMessages.collectAsState()
+
+    Column(
+        modifier = Modifier.fillMaxSize()
+    ) {
+        LazyColumn(
+            modifier = Modifier.weight(1f),
+            contentPadding = PaddingValues(16.dp)
+        ) {
+            items(chatMessages) { message ->
+                ChatBotMessage(message.text, message.isUser)
+            }
+        }
+        MessageInput(
+            onMessageSent = { message ->
+                chatViewModel.sendMessage(message)
+            }
+        )
+    }
+}
+package com.example.expensetrackerchatbot.ui
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.MaterialTheme
+import androidx.compose.material.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
+
+@Composable
+fun ChatBotMessage(message: String, isUser: Boolean) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
+    ) {
+        Box(
+            modifier = Modifier
+                .background(
+                    color = if (isUser) MaterialTheme.colors.primary else Color.LightGray,
+                    shape = RoundedCornerShape(12.dp)
+                )
+                .padding(12.dp)
+        ) {
+            Text(text = message, color = Color.Black)
+        }
+    }
+}
+package com.example.expensetrackerchatbot.ui
+
+import androidx.compose.foundation.layout.*
+import androidx.compose.material.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+
+@Composable
+fun MessageInput(
+    onMessageSent: (String) -> Unit
+) {
+    var textState by remember { mutableStateOf("") }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(8.dp)
+    ) {
+        TextField(
+            value = textState,
+            onValueChange = { textState = it },
+            modifier = Modifier.weight(1f),
+            placeholder = { Text("Type a message") }
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Button(
+            onClick = {
+                if (textState.isNotBlank()) {
+                    onMessageSent(textState)
+                    textState = ""
+                }
+            }
+        ) {
+            Text("Send")
+        }
+    }
+}
+package com.example.expensetrackerchatbot.viewmodel
+
+import androidx.lifecycle.ViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import com.example.expensetrackerchatbot.data.model.ChatMessage
+
+class ChatViewModel : ViewModel() {
+
+    private val _chatMessages = MutableStateFlow<List<ChatMessage>>(emptyList())
+    val chatMessages = _chatMessages.asStateFlow()
+
+    fun sendMessage(message: String) {
+        val newList = _chatMessages.value.toMutableList()
+        newList.add(ChatMessage(message, isUser = true))
+        newList.add(ChatMessage(botReply(message), isUser = false))
+        _chatMessages.value = newList
+    }
+
+    private fun botReply(userMessage: String): String {
+        return "You said: \"$userMessage\". (Real bot coming soon!)"
+    }
+}
+package com.example.expensetrackerchatbot.data.model
+
+data class ChatMessage(
+    val text: String,
+    val isUser: Boolean
+)
+dependencies {
+    // Tesseract OCR
+    implementation 'com.googlecode.tesseract.android:tess-two:9.1.0'
+
+    // Image picker (optional but helpful)
+    implementation 'io.github.dhaval2404:imagepicker:2.1'
+}
+package com.example.expensetrackerchatbot.ocr
+
+import android.content.Context
+import android.graphics.Bitmap
+import com.googlecode.tesseract.android.TessBaseAPI
+import java.io.File
+import java.io.IOException
+
+class OCRProcessor(private val context: Context) {
+
+    private var tessBaseAPI: TessBaseAPI? = null
+
+    init {
+        tessBaseAPI = TessBaseAPI()
+        val dataPath = context.getExternalFilesDir(null)?.absolutePath + "/tesseract/"
+        val lang = "eng"
+
+        val dir = File(dataPath + "tessdata/")
+        if (!dir.exists()) {
+            dir.mkdirs()
+        }
+
+        val trainedDataFile = File(dir, "$lang.traineddata")
+        if (!trainedDataFile.exists()) {
+            try {
+                val inputStream = context.assets.open("tessdata/$lang.traineddata")
+                trainedDataFile.outputStream().use { output ->
+                    inputStream.copyTo(output)
+                }
+            } catch (e: IOException) {
+                e.printStackTrace()
+            }
+        }
+
+        tessBaseAPI?.init(dataPath, lang)
+    }
+
+    fun extractText(bitmap: Bitmap): String {
+        tessBaseAPI?.setImage(bitmap)
+        return tessBaseAPI?.utF8Text ?: ""
+    }
+
+    fun release() {
+        tessBaseAPI?.end()
+    }
+}
+import androidx.activity.result.contract.ActivityResultContracts
+import io.github.dhaval2404.imagepicker.ImagePicker
+
+// Inside MainActivity
+
+private val imagePickerLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+    if (result.resultCode == RESULT_OK) {
+        val uri = result.data?.data
+        uri?.let {
+            val bitmap = MediaStore.Images.Media.getBitmap(this.contentResolver, uri)
+            val ocrProcessor = OCRProcessor(this)
+            val extractedText = ocrProcessor.extractText(bitmap)
+            // Send extracted text to chatbot
+            chatViewModel.sendMessage(extractedText)
+            ocrProcessor.release()
+        }
+    }
+}
+
+// To pick image:
+fun pickImage() {
+    ImagePicker.with(this)
+        .crop()      // Optional cropping
+        .galleryOnly()
+        .createIntent { intent ->
+            imagePickerLauncher.launch(intent)
+        }
+}
+<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+<uses-permission android:name="android.permission.CAMERA" />
+package com.example.expensetrackerchatbot.ui
+
+import android.app.Activity
+import android.graphics.Bitmap
+import android.provider.MediaStore
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+import com.example.expensetrackerchatbot.ocr.OCRProcessor
+import com.example.expensetrackerchatbot.viewmodel.ChatViewModel
+import io.github.dhaval2404.imagepicker.ImagePicker
+
+@Composable
+fun ChatScreen(chatViewModel: ChatViewModel = viewModel()) {
+    val context = LocalContext.current
+    val activity = context as Activity
+    val chatMessages by chatViewModel.chatMessages.collectAsState()
+
+    val imagePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val uri = result.data?.data
+            uri?.let {
+                val bitmap = MediaStore.Images.Media.getBitmap(context.contentResolver, it)
+                val ocrProcessor = OCRProcessor(context)
+                val extractedText = ocrProcessor.extractText(bitmap)
+                ocrProcessor.release()
+
+                // Send extracted text to chatbot
+                chatViewModel.sendMessage(extractedText)
+            }
+        }
+    }
+
+    Column(
+        modifier = Modifier.fillMaxSize()
+    ) {
+        LazyColumn(
+            modifier = Modifier.weight(1f),
+            contentPadding = PaddingValues(16.dp)
+        ) {
+            items(chatMessages) { message ->
+                ChatBotMessage(message.text, message.isUser)
+            }
+        }
+        
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(8.dp)
+        ) {
+            MessageInput(
+                onMessageSent = { message ->
+                    chatViewModel.sendMessage(message)
+                }
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Button(
+                onClick = {
+                    ImagePicker.with(activity)
+                        .crop() // Optional
+                        .galleryOnly()
+                        .createIntent { intent ->
+                            imagePickerLauncher.launch(intent)
+                        }
+                }
+            ) {
+                Text("📷 Upload")
+            }
+        }
+    }
+}
+<uses-permission android:name="android.permission.RECORD_AUDIO" />
+package com.example.expensetrackerchatbot.voice
+
+import android.app.Activity
+import android.content.Intent
+import android.speech.RecognizerIntent
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
+import java.util.*
+
+class VoiceRecognizer(
+    private val activity: Activity,
+    private val onResult: (String) -> Unit
+) {
+
+    private lateinit var voiceLauncher: ActivityResultLauncher<Intent>
+
+    fun registerLauncher(launcher: ActivityResultLauncher<Intent>) {
+        voiceLauncher = launcher
+    }
+
+    fun startListening() {
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
+
+        voiceLauncher.launch(intent)
+    }
+
+    fun handleResult(data: Intent?) {
+        val result = data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+        val spokenText = result?.firstOrNull() ?: ""
+        onResult(spokenText)
+    }
+}
+import com.example.expensetrackerchatbot.voice.VoiceRecognizer
+
+@Composable
+fun ChatScreen(chatViewModel: ChatViewModel = viewModel()) {
+    val context = LocalContext.current
+    val activity = context as Activity
+    val chatMessages by chatViewModel.chatMessages.collectAsState()
+
+    // OCR
+    val imagePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val uri = result.data?.data
+            uri?.let {
+                val bitmap = MediaStore.Images.Media.getBitmap(context.contentResolver, it)
+                val ocrProcessor = OCRProcessor(context)
+                val extractedText = ocrProcessor.extractText(bitmap)
+                ocrProcessor.release()
+                chatViewModel.sendMessage(extractedText)
+            }
+        }
+    }
+
+    // Voice Recognition
+    val voiceRecognizer = remember { VoiceRecognizer(activity) }
+    val voiceLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            voiceRecognizer.handleResult(result.data)
+        }
+    }
+
+    voiceRecognizer.registerLauncher(voiceLauncher)
+
+    Column(
+        modifier = Modifier.fillMaxSize()
+    ) {
+        LazyColumn(
+            modifier = Modifier.weight(1f),
+            contentPadding = PaddingValues(16.dp)
+        ) {
+            items(chatMessages) { message ->
+                ChatBotMessage(message.text, message.isUser)
+            }
+        }
+        
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(8.dp)
+        ) {
+            MessageInput(
+                onMessageSent = { message ->
+                    chatViewModel.sendMessage(message)
+                }
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Button(
+                onClick = {
+                    ImagePicker.with(activity)
+                        .crop()
+                        .galleryOnly()
+                        .createIntent { intent ->
+                            imagePickerLauncher.launch(intent)
+                        }
+                }
+            ) {
+                Text("📷 Upload")
+            }
+            Spacer(modifier = Modifier.width(4.dp))
+            Button(
+                onClick = {
+                    voiceRecognizer.startListening()
+                }
+            ) {
+                Text("🎤 Voice")
+            }
+        }
+    }
+}
+dependencies {
+    // Room components
+    implementation "androidx.room:room-runtime:2.6.1"
+    kapt "androidx.room:room-compiler:2.6.1"
+    implementation "androidx.room:room-ktx:2.6.1"
+}
+package com.example.expensetrackerchatbot.model
+
+import androidx.room.Entity
+import androidx.room.PrimaryKey
+
+@Entity(tableName = "expenses")
+data class Expense(
+    @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    val amount: Double,
+    val category: String,
+    val description: String,
+    val timestamp: Long
+)
+package com.example.expensetrackerchatbot.data
+
+import androidx.room.Dao
+import androidx.room.Insert
+import androidx.room.Query
+import com.example.expensetrackerchatbot.model.Expense
+
+@Dao
+interface ExpenseDao {
+
+    @Insert
+    suspend fun insertExpense(expense: Expense)
+
+    @Query("SELECT * FROM expenses ORDER BY timestamp DESC")
+    suspend fun getAllExpenses(): List<Expense>
+}
+package com.example.expensetrackerchatbot.data
+
+import androidx.room.Database
+import androidx.room.RoomDatabase
+import com.example.expensetrackerchatbot.model.Expense
+
+@Database(entities = [Expense::class], version = 1)
+abstract class AppDatabase : RoomDatabase() {
+    abstract fun expenseDao(): ExpenseDao
+}
+val db = Room.databaseBuilder(
+    applicationContext,
+    AppDatabase::class.java, "expenses-db"
+).build()
+
+val expenseDao = db.expenseDao()
+package com.example.expensetrackerchatbot.ml
+
+object ExpenseCategorizer {
+
+    fun categorize(text: String): String {
+        val lowerText = text.lowercase()
+
+        return when {
+            lowerText.contains("food") || lowerText.contains("lunch") || lowerText.contains("dinner") -> "Food"
+            lowerText.contains("uber") || lowerText.contains("transport") || lowerText.contains("taxi") -> "Transport"
+            lowerText.contains("rent") || lowerText.contains("apartment") -> "Rent"
+            lowerText.contains("movie") || lowerText.contains("netflix") -> "Entertainment"
+            lowerText.contains("medicine") || lowerText.contains("doctor") -> "Health"
+            lowerText.contains("clothes") || lowerText.contains("shopping") -> "Shopping"
+            else -> "Others"
+        }
+    }
+}
+fun sendMessage(message: String) {
+    // Add user message to UI
+    _chatMessages.value += ChatMessage(message, isUser = true)
+
+    // Try to auto-parse expense
+    val amount = extractAmount(message)
+    val description = extractDescription(message)
+    val category = ExpenseCategorizer.categorize(description)
+
+    if (amount != null) {
+        // Save to database
+        viewModelScope.launch {
+            expenseDao.insertExpense(
+                Expense(
+                    amount = amount,
+                    category = category,
+                    description = description,
+                    timestamp = System.currentTimeMillis()
+                )
+            )
+        }
+
+        // Chatbot Reply
+        _chatMessages.value += ChatMessage(
+            "Saved expense: $amount৳ for $category ($description)", 
+            isUser = false
+        )
+    } else {
+        // Chatbot fallback reply
+        _chatMessages.value += ChatMessage("Sorry, I couldn't understand the amount.", isUser = false)
+    }
+}
+
+private fun extractAmount(text: String): Double? {
+    val regex = Regex("\\d+\\.?\\d*")
+    val match = regex.find(text)
+    return match?.value?.toDoubleOrNull()
+}
+
+private fun extractDescription(text: String): String {
+    val amountPattern = Regex("\\d+\\.?\\d*")
+    return text.replace(amountPattern, "").trim()
+}
+package com.example.expensetrackerchatbot.ui
+
+import androidx.compose.foundation.layout.*
+import androidx.compose.material.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import com.example.expensetrackerchatbot.data.ExpenseDao
+import kotlinx.coroutines.launch
+
+@Composable
+fun ExpenseSummaryScreen(expenseDao: ExpenseDao) {
+    val scope = rememberCoroutineScope()
+    var totalAmount by remember { mutableStateOf(0.0) }
+    var topCategories by remember { mutableStateOf(listOf<Pair<String, Double>>()) }
+
+    LaunchedEffect(Unit) {
+        scope.launch {
+            val expenses = expenseDao.getAllExpenses()
+            totalAmount = expenses.sumOf { it.amount }
+            
+            val categoryTotals = expenses.groupBy { it.category }
+                .mapValues { entry -> entry.value.sumOf { it.amount } }
+                .toList()
+                .sortedByDescending { it.second }
+                .take(3)
+
+            topCategories = categoryTotals
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text("Total Expenses", style = MaterialTheme.typography.h5)
+        Text("৳${"%.2f".format(totalAmount)}", style = MaterialTheme.typography.h4, color = MaterialTheme.colors.primary)
+        Spacer(modifier = Modifier.height(24.dp))
+
+        Text("Top Categories", style = MaterialTheme.typography.h6)
+        topCategories.forEach { (category, amount) ->
+            Text("$category: ৳${"%.2f".format(amount)}")
+        }
+    }
+}
+package com.example.expensetrackerchatbot.ui
+
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.material.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import com.example.expensetrackerchatbot.data.ExpenseDao
+import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.*
+
+@Composable
+fun ExpenseCalendarScreen(expenseDao: ExpenseDao) {
+    val scope = rememberCoroutineScope()
+    var dailyExpenses by remember { mutableStateOf<Map<String, Double>>(emptyMap()) }
+
+    LaunchedEffect(Unit) {
+        scope.launch {
+            val expenses = expenseDao.getAllExpenses()
+            val dateFormatter = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+
+            dailyExpenses = expenses.groupBy { expense ->
+                dateFormatter.format(Date(expense.timestamp))
+            }.mapValues { entry ->
+                entry.value.sumOf { it.amount }
+            }
+        }
+    }
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+    ) {
+        dailyExpenses.forEach { (date, total) ->
+            item {
+                Text(text = "$date - ৳${"%.2f".format(total)}", style = MaterialTheme.typography.subtitle1)
+                Divider()
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+        }
+    }
+}
+package com.example.expensetrackerchatbot.utils
+
+import android.content.Context
+import android.os.Environment
+import com.example.expensetrackerchatbot.model.Expense
+import java.io.File
+import java.io.FileWriter
+
+object CsvExporter {
+
+    fun exportExpenses(context: Context, expenses: List<Expense>): String {
+        val csvHeader = "Date,Category,Amount,Description\n"
+        val fileName = "expenses_${System.currentTimeMillis()}.csv"
+        val dir = context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS)
+        val file = File(dir, fileName)
+
+        FileWriter(file).use { writer ->
+            writer.append(csvHeader)
+            expenses.forEach { expense ->
+                val date = java.text.SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(expense.timestamp))
+                writer.append("$date,${expense.category},${expense.amount},${expense.description}\n")
+            }
+        }
+        return file.absolutePath
+    }
+}
+Button(onClick = {
+    scope.launch {
+        val expenses = expenseDao.getAllExpenses()
+        val path = CsvExporter.exportExpenses(context, expenses)
+        Toast.makeText(context, "CSV saved at: $path", Toast.LENGTH_LONG).show()
+    }
+}) {
+    Text("📤 Export CSV")
+}
+dependencies {
+    implementation "androidx.navigation:navigation-compose:2.6.0"
+    implementation "androidx.compose.material3:material3:1.0.1"
+}
+package com.example.expensetrackerchatbot.ui
+
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.navigation.NavHostController
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.BottomNavigation
+import androidx.compose.material3.BottomNavigationItem
+import androidx.compose.ui.res.painterResource
+import androidx.compose.material3.Icon
+import androidx.compose.ui.graphics.Color
+import androidx.compose.material3.icons.Icons
+import androidx.compose.material3.icons.filled.Home
+import androidx.compose.material3.icons.filled.CalendarToday
+import androidx.compose.material3.icons.filled.PieChart
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun NavGraph() {
+    val navController = rememberNavController()
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Expense Tracker") },
+                backgroundColor = Color(0xFF6200EE)
+            )
+        },
+        bottomBar = {
+            BottomNavigation(
+                backgroundColor = Color(0xFF6200EE),
+                contentColor = Color.White
+            ) {
+                BottomNavigationItem(
+                    icon = { Icon(Icons.Filled.Home, contentDescription = "Home") },
+                    selected = false,
+                    onClick = { navController.navigate("home") }
+                )
+                BottomNavigationItem(
+                    icon = { Icon(Icons.Filled.CalendarToday, contentDescription = "Calendar") },
+                    selected = false,
+                    onClick = { navController.navigate("calendar") }
+                )
+                BottomNavigationItem(
+                    icon = { Icon(Icons.Filled.PieChart, contentDescription = "Summary") },
+                    selected = false,
+                    onClick = { navController.navigate("summary") }
+                )
+            }
+        }
+    ) { paddingValues ->
+        NavHost(
+            navController = navController,
+            startDestination = "home",
+            modifier = Modifier.padding(paddingValues)
+        ) {
+            composable("home") {
+                HomeScreen() // We'll create this
+            }
+            composable("calendar") {
+                ExpenseCalendarScreen() // Your Calendar screen
+            }
+            composable("summary") {
+                ExpenseSummaryScreen() // Your Summary screen
+            }
+        }
+    }
+}
+package com.example.expensetrackerchatbot.ui
+
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import com.example.expensetrackerchatbot.ui.theme.ExpenseTrackerChatBotTheme
+
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContent {
+            ExpenseTrackerChatBotTheme {
+                Surface(color = MaterialTheme.colorScheme.background) {
+                    NavGraph() // Launch our navigation graph
+                }
+            }
+        }
+    }
+}
+package com.example.expensetrackerchatbot.ui
+
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import com.example.expensetrackerchatbot.viewmodel.ChatViewModel
+import androidx.lifecycle.viewmodel.compose.viewModel
+
+@Composable
+fun HomeScreen(chatViewModel: ChatViewModel = viewModel()) {
+    val chatMessages by chatViewModel.chatMessages.collectAsState()
+
+    Column(
+        modifier = Modifier.fillMaxSize().padding(16.dp)
+    ) {
+        LazyColumn(
+            modifier = Modifier.weight(1f),
+            contentPadding = PaddingValues(16.dp)
+        ) {
+            items(chatMessages) { message ->
+                ChatBotMessage(message.text, message.isUser)
+            }
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(8.dp)
+        ) {
+            MessageInput(
+                onMessageSent = { message ->
+                    chatViewModel.sendMessage(message)
+                }
+            )
+        }
+    }
+}
+package com.example.expensetrackerchatbot.ui.theme
+
+import androidx.compose.material3.*
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
+
+private val LightColorPalette = lightColorScheme(
+    primary = Color(0xFF6200EE),
+    secondary = Color(0xFF03DAC6),
+)
+
+private val DarkColorPalette = darkColorScheme(
+    primary = Color(0xFFBB86FC),
+    secondary = Color(0xFF03DAC6),
+)
+
+@Composable
+fun ExpenseTrackerChatBotTheme(
+    darkTheme: Boolean = false,
+    content: @Composable () -> Unit
+) {
+    val colors = if (darkTheme) DarkColorPalette else LightColorPalette
+
+    MaterialTheme(
+        colorScheme = colors,
+        typography = Typography,
+        content = content
+    )
+}
+@Composable
+fun AnimatedNavGraph() {
+    val navController = rememberNavController()
+
+    Scaffold(
+        topBar = { TopAppBar(title = { Text("Expense Tracker") }) },
+        bottomBar = { BottomNavigation() }
+    ) { paddingValues ->
+        AnimatedNavHost(
+            navController = navController,
+            startDestination = "home",
+            modifier = Modifier.padding(paddingValues)
+        ) {
+            composable("home") {
+                HomeScreen() // Your Home screen with animation
+            }
+            composable("calendar") {
+                ExpenseCalendarScreen() // Your Calendar screen with animation
+            }
+            composable("summary") {
+                ExpenseSummaryScreen() // Your Summary screen with animation
+            }
+        }
+    }
+}
+implementation 'com.github.PhilJay:MPAndroidChart:v3.1.0'
+import com.github.mikephil.charting.charts.PieChart
+import com.github.mikephil.charting.data.PieData
+import com.github.mikephil.charting.data.PieDataSet
+import com.github.mikephil.charting.data.PieEntry
+
+@Composable
+fun ExpenseSummaryScreen(expenseDao: ExpenseDao) {
+    var categories by remember { mutableStateOf(listOf<PieEntry>()) }
+
+    LaunchedEffect(Unit) {
+        val expenses = expenseDao.getAllExpenses()
+        val categoryData = expenses.groupBy { it.category }
+            .mapValues { entry -> entry.value.sumOf { it.amount } }
+
+        categories = categoryData.map { PieEntry(it.value.toFloat(), it.key) }
+    }
+
+    Column(modifier = Modifier.padding(16.dp)) {
+        Text("Expense Summary", style = MaterialTheme.typography.h6)
+
+        PieChart(
+            modifier = Modifier.fillMaxWidth().height(300.dp)
+        ) {
+            val pieDataSet = PieDataSet(categories, "Categories")
+            pieDataSet.colors = listOf(Color.Blue, Color.Red, Color.Green, Color.Yellow)
+            val pieData = PieData(pieDataSet)
+            data = pieData
+            setUsePercentValues(true)
+            invalidate()
+        }
+    }
+}
+import com.github.mikephil.charting.charts.LineChart
+import com.github.mikephil.charting.data.LineData
+import com.github.mikephil.charting.data.LineDataSet
+import com.github.mikephil.charting.data.Entry
+
+@Composable
+fun SpendingTrendChart(expenses: List<Expense>) {
+    val entries = expenses.mapIndexed { index, expense ->
+        Entry(index.toFloat(), expense.amount.toFloat())
+    }
+
+    val lineDataSet = LineDataSet(entries, "Spending Trend")
+    val lineData = LineData(lineDataSet)
+
+    LineChart(
+        modifier = Modifier.fillMaxWidth().height(300.dp)
+    ) {
+        data = lineData
+        invalidate()
+    }
+}
+<uses-permission android:name="android.permission.RECORD_AUDIO"/>
+import android.speech.RecognizerIntent
+import android.content.Intent
+import android.speech.SpeechRecognizer
+import android.app.Activity
+
+fun startVoiceInput(activity: Activity) {
+    val speechRecognizer = SpeechRecognizer.createSpeechRecognizer(activity)
+    val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+    intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+    activity.startActivityForResult(intent, VOICE_REQUEST_CODE)
+}
+
+companion object {
+    const val VOICE_REQUEST_CODE = 101
+}
+@Composable
+fun UserProfileScreen() {
+    var userName by remember { mutableStateOf("John Doe") }
+    var spendingLimit by remember { mutableStateOf(5000.0) }
+
+    Column(modifier = Modifier.padding(16.dp)) {
+        Text("User Profile", style = MaterialTheme.typography.h6)
+        TextField(
+            value = userName,
+            onValueChange = { userName = it },
+            label = { Text("Name") }
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        TextField(
+            value = "৳${"%.2f".format(spendingLimit)}",
+            onValueChange = { spendingLimit = it.toDouble() },
+            label = { Text("Spending Limit") }
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        Button(onClick = { /* Save changes */ }) {
+            Text("Save")
+        }
+    }
+}
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.Icon
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.Color
+import androidx.compose.material3.icons.Icons
+import androidx.compose.material3.icons.filled.Add
+
+@Composable
+fun AnimatedFab() {
+    var fabSize by remember { mutableStateOf(56.dp) }
+    val animatedSize by animateDpAsState(targetValue = fabSize, animationSpec = tween(durationMillis = 300))
+
+    FloatingActionButton(
+        onClick = { fabSize = if (fabSize == 56.dp) 72.dp else 56.dp },
+        modifier = Modifier.size(animatedSize),
+        containerColor = Color(0xFF6200EE)
+    ) {
+        Icon(Icons.Filled.Add, contentDescription = "Add")
+    }
+}
