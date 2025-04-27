@@ -1,0 +1,313 @@
+
+MainActivity.kt:
+
+package com.example.expensetrackerchatbot.ui
+
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import com.example.expensetrackerchatbot.ui.theme.ExpenseTrackerChatBotTheme
+
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContent {
+            ExpenseTrackerChatBotTheme {
+                Surface(color = MaterialTheme.colorScheme.background) {
+                    NavGraph() // Launch our navigation graph
+                }
+            }
+        }
+    }
+}
+
+NavGraph.kt:
+
+package com.example.expensetrackerchatbot.ui
+
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.navigation.NavHostController
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.BottomNavigation
+import androidx.compose.material3.BottomNavigationItem
+import androidx.compose.ui.res.painterResource
+import androidx.compose.material3.Icon
+import androidx.compose.ui.graphics.Color
+import androidx.compose.material3.icons.Icons
+import androidx.compose.material3.icons.filled.Home
+import androidx.compose.material3.icons.filled.CalendarToday
+import androidx.compose.material3.icons.filled.PieChart
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun NavGraph() {
+    val navController = rememberNavController()
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Expense Tracker") },
+                backgroundColor = Color(0xFF6200EE)
+            )
+        },
+        bottomBar = {
+            BottomNavigation(
+                backgroundColor = Color(0xFF6200EE),
+                contentColor = Color.White
+            ) {
+                BottomNavigationItem(
+                    icon = { Icon(Icons.Filled.Home, contentDescription = "Home") },
+                    selected = false,
+                    onClick = { navController.navigate("home") }
+                )
+                BottomNavigationItem(
+                    icon = { Icon(Icons.Filled.CalendarToday, contentDescription = "Calendar") },
+                    selected = false,
+                    onClick = { navController.navigate("calendar") }
+                )
+                BottomNavigationItem(
+                    icon = { Icon(Icons.Filled.PieChart, contentDescription = "Summary") },
+                    selected = false,
+                    onClick = { navController.navigate("summary") }
+                )
+            }
+        }
+    ) { paddingValues ->
+        NavHost(
+            navController = navController,
+            startDestination = "home",
+            modifier = Modifier.padding(paddingValues)
+        ) {
+            composable("home") {
+                HomeScreen() // We'll create this
+            }
+            composable("calendar") {
+                ExpenseCalendarScreen() // Your Calendar screen
+            }
+            composable("summary") {
+                ExpenseSummaryScreen() // Your Summary screen
+            }
+        }
+    }
+}
+
+HomeScreen.kt:
+
+package com.example.expensetrackerchatbot.ui
+
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import com.example.expensetrackerchatbot.viewmodel.ChatViewModel
+import androidx.lifecycle.viewmodel.compose.viewModel
+
+@Composable
+fun HomeScreen(chatViewModel: ChatViewModel = viewModel()) {
+    val chatMessages by chatViewModel.chatMessages.collectAsState()
+
+    Column(
+        modifier = Modifier.fillMaxSize().padding(16.dp)
+    ) {
+        LazyColumn(
+            modifier = Modifier.weight(1f),
+            contentPadding = PaddingValues(16.dp)
+        ) {
+            items(chatMessages) { message ->
+                ChatBotMessage(message.text, message.isUser)
+            }
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(8.dp)
+        ) {
+            MessageInput(
+                onMessageSent = { message ->
+                    chatViewModel.sendMessage(message)
+                }
+            )
+        }
+    }
+}
+
+ExpenseSummaryScreen.kt:
+
+import com.github.mikephil.charting.charts.PieChart
+import com.github.mikephil.charting.data.PieData
+import com.github.mikephil.charting.data.PieDataSet
+import com.github.mikephil.charting.data.PieEntry
+
+@Composable
+fun ExpenseSummaryScreen(expenseDao: ExpenseDao) {
+    var categories by remember { mutableStateOf(listOf<PieEntry>()) }
+
+    LaunchedEffect(Unit) {
+        val expenses = expenseDao.getAllExpenses()
+        val categoryData = expenses.groupBy { it.category }
+            .mapValues { entry -> entry.value.sumOf { it.amount } }
+
+        categories = categoryData.map { PieEntry(it.value.toFloat(), it.key) }
+    }
+
+    Column(modifier = Modifier.padding(16.dp)) {
+        Text("Expense Summary", style = MaterialTheme.typography.h6)
+
+        PieChart(
+            modifier = Modifier.fillMaxWidth().height(300.dp)
+        ) {
+            val pieDataSet = PieDataSet(categories, "Categories")
+            pieDataSet.colors = listOf(Color.Blue, Color.Red, Color.Green, Color.Yellow)
+            val pieData = PieData(pieDataSet)
+            data = pieData
+            setUsePercentValues(true)
+            invalidate()
+        }
+    }
+}
+
+UserProfileScreen.kt:
+
+@Composable
+fun UserProfileScreen() {
+    var userName by remember { mutableStateOf("John Doe") }
+    var spendingLimit by remember { mutableStateOf(5000.0) }
+
+    Column(modifier = Modifier.padding(16.dp)) {
+        Text("User Profile", style = MaterialTheme.typography.h6)
+        TextField(
+            value = userName,
+            onValueChange = { userName = it },
+            label = { Text("Name") }
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        TextField(
+            value = "৳${"%.2f".format(spendingLimit)}",
+            onValueChange = { spendingLimit = it.toDouble() },
+            label = { Text("Spending Limit") }
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        Button(onClick = { /* Save changes */ }) {
+            Text("Save")
+        }
+    }
+}
+
+Theme.kt:
+
+package com.example.expensetrackerchatbot.ui.theme
+
+import androidx.compose.material3.*
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
+
+private val LightColorPalette = lightColorScheme(
+    primary = Color(0xFF6200EE),
+    secondary = Color(0xFF03DAC6),
+)
+
+private val DarkColorPalette = darkColorScheme(
+    primary = Color(0xFFBB86FC),
+    secondary = Color(0xFF03DAC6),
+)
+
+@Composable
+fun ExpenseTrackerChatBotTheme(
+    darkTheme: Boolean = false,
+    content: @Composable () -> Unit
+) {
+    val colors = if (darkTheme) DarkColorPalette else LightColorPalette
+
+    MaterialTheme(
+        colorScheme = colors,
+        typography = Typography,
+        content = content
+    )
+}
+
+MPAndroidChart Integration (PieChart and LineChart):
+
+1. Add Dependency in build.gradle:
+implementation 'com.github.PhilJay:MPAndroidChart:v3.1.0'
+
+2. PieChart and LineChart setup examples provided above in the content.
+
+VoiceInput.kt:
+
+import android.speech.RecognizerIntent
+import android.content.Intent
+import android.speech.SpeechRecognizer
+import android.app.Activity
+
+fun startVoiceInput(activity: Activity) {
+    val speechRecognizer = SpeechRecognizer.createSpeechRecognizer(activity)
+    val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+    intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+    activity.startActivityForResult(intent, VOICE_REQUEST_CODE)
+}
+
+companion object {
+    const val VOICE_REQUEST_CODE = 101
+}
+@Composable
+fun UserProfileScreen() {
+    var userName by remember { mutableStateOf("John Doe") }
+    var spendingLimit by remember { mutableStateOf(5000.0) }
+
+    Column(modifier = Modifier.padding(16.dp)) {
+        Text("User Profile", style = MaterialTheme.typography.h6)
+        TextField(
+            value = userName,
+            onValueChange = { userName = it },
+            label = { Text("Name") }
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        TextField(
+            value = "?${"%.2f".format(spendingLimit)}",
+            onValueChange = { spendingLimit = it.toDouble() },
+            label = { Text("Spending Limit") }
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        Button(onClick = { /* Save changes */ }) {
+            Text("Save")
+        }
+    }
+}
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.Icon
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.Color
+import androidx.compose.material3.icons.Icons
+import androidx.compose.material3.icons.filled.Add
+
+@Composable
+fun AnimatedFab() {
+    var fabSize by remember { mutableStateOf(56.dp) }
+    val animatedSize by animateDpAsState(targetValue = fabSize, animationSpec = tween(durationMillis = 300))
+
+    FloatingActionButton(
+        onClick = { fabSize = if (fabSize == 56.dp) 72.dp else 56.dp },
+        modifier = Modifier.size(animatedSize),
+        containerColor = Color(0xFF6200EE)
+    ) {
+        Icon(Icons.Filled.Add, contentDescription = "Add")
+    }
+}
